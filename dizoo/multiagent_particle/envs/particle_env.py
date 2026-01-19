@@ -132,9 +132,9 @@ class ModifiedPredatorPrey(BaseEnv):
     def __init__(self, cfg: dict) -> None:
         self._cfg = cfg
         self._env_name = 'simple_tagv1'
-        self._n_uav = cfg.get("n_uav", 2)
+        self._n_ugv = cfg.get("n_ugv", 2)
         self._n_target = cfg.get("n_target", 1)
-        self._n_agent = self._n_uav + self._n_target
+        self._n_agent = self._n_ugv + self._n_target
         self._num_landmarks = cfg.get("num_landmarks", 3)
         self._external_cfg = {
             'num_catch': cfg.get('num_catch', 1),
@@ -156,8 +156,8 @@ class ModifiedPredatorPrey(BaseEnv):
         # Note: init llm clusters
         self._use_llm = cfg.get('experiment', False)
         self._clusters = np.concatenate((
-            np.full(self._n_uav // 2, 0), 
-            np.full(self._n_uav - self._n_uav // 2, 0)
+            np.full(self._n_ugv // 2, 0), 
+            np.full(self._n_ugv - self._n_ugv // 2, 0)
         ))
         
     def reset(self) -> np.ndarray:
@@ -197,7 +197,7 @@ class ModifiedPredatorPrey(BaseEnv):
 
     def process_obs(self, obs: list):
         ret = {}
-        obs = obs[:self._n_uav]
+        obs = obs[:self._n_ugv]
         obs = np.array(obs).astype(np.float32)
         ret['agent_state'] = np.concatenate(
             [obs[:, 0:4 + (self._n_agent - 1) * 2], obs[:, -self._num_landmarks * 2:]], 1
@@ -208,32 +208,40 @@ class ModifiedPredatorPrey(BaseEnv):
         region, region_label = self._get_region(ret['agent_state'], k = 2)
         ret['region_state'] = region
         ret['region_label'] = region_label
+        ret['neighborhood_state'] = region
+        ret['n_agent'] = int(self._n_ugv)
+        ret['n_target'] = int(self._n_target)
+        ret['num_landmarks'] = int(self._num_landmarks)
+        ret['timestep'] = self._step_count
+        self._llm_exploration = True
+        ret['llm_exploration'] = self._llm_exploration
+
         if self.obs_alone:
             ret['agent_alone_state'] = np.concatenate([obs[:, 0:4], obs[:, -self._num_landmarks * 2:]], 1)
             ret['agent_alone_padding_state'] = np.concatenate(
                 [
                     obs[:, 0:4],
-                    np.zeros((self._n_uav, (self._n_agent - 1) * 2), np.float32), obs[:, -self._num_landmarks * 2:]
+                    np.zeros((self._n_ugv, (self._n_agent - 1) * 2), np.float32), obs[:, -self._num_landmarks * 2:]
                 ], 1
             )
-        ret['action_mask'] = np.ones((self._n_uav, self.action_dim))
+        ret['action_mask'] = np.ones((self._n_ugv, self.action_dim))
         return ret
 
     def _get_region(self, obs_n, k):
         _use_llm = self._use_llm
         _use_llm = False
-        region_labels = np.zeros([self._n_uav]).astype(np.float32)
-        region = np.zeros([k, self._n_uav, self.obs_dim]).astype(np.float32)
+        region_labels = np.zeros([self._n_ugv]).astype(np.float32)
+        region = np.zeros([k, self._n_ugv, self.obs_dim]).astype(np.float32)
         agent_states = obs_n
                 
         # Generate region labels using llm model  
         if _use_llm and self._step_count <= 1e3:
             llm_agent = QwenAgent()
-            output = llm_agent.get_region(agent_states, self._n_uav, self._n_target, self._num_landmarks, k)
+            output = llm_agent.get_region(agent_states, self._n_ugv, self._n_target, self._num_landmarks, k)
             # Add region labels
             if isinstance(output, dict):
                 try:
-                    for i in range(self._n_uav):
+                    for i in range(self._n_ugv):
                         for j in range(k):
                             if i in output[f'system_{j}']:
                                 region_labels[i] = j
@@ -267,7 +275,7 @@ class ModifiedPredatorPrey(BaseEnv):
         # collide_sum = 0
         # for i in range(self._n_agent):
         #     collide_sum += info['n'][i][1]
-        rew_n = rew_n / (self._max_step * self._n_uav)
+        rew_n = rew_n / (self._max_step * self._n_ugv)
         self._sum_reward += rew_n
         if self._step_count >= self._max_step:
             done_n = True
@@ -281,17 +289,17 @@ class ModifiedPredatorPrey(BaseEnv):
         T = EnvElementInfo
         if self._obs_alone:
             return CNEnvInfo(
-                agent_num=self._n_uav,
+                agent_num=self._n_ugv,
                 obs_space=T(
                     {
-                        'agent_state': (self._n_uav, self.obs_dim),
+                        'agent_state': (self._n_ugv, self.obs_dim),
                         'global_state': (self.global_obs_dim, ),
-                        'action_mask': (self._n_uav, self.action_dim)
+                        'action_mask': (self._n_ugv, self.action_dim)
                     },
                     None,
                 ),
                 act_space=T(
-                    (self._n_uav, self.action_dim),
+                    (self._n_ugv, self.action_dim),
                     {
                         'min': 0,
                         'max': self.action_dim,
@@ -304,19 +312,19 @@ class ModifiedPredatorPrey(BaseEnv):
                 )
             )
         return CNEnvInfo(
-            agent_num=self._n_uav,
+            agent_num=self._n_ugv,
             obs_space=T(
                 {
-                    'agent_state': (self._n_uav, self.obs_dim),
-                    'agent_alone_state': (self._n_uav, self.obs_alone_dim),
-                    'agent_alone_padding_state': (self._n_uav, self.obs_dim),
+                    'agent_state': (self._n_ugv, self.obs_dim),
+                    'agent_alone_state': (self._n_ugv, self.obs_alone_dim),
+                    'agent_alone_padding_state': (self._n_ugv, self.obs_dim),
                     'global_state': (self.global_obs_dim, ),
-                    'action_mask': (self._n_uav, self.action_dim)
+                    'action_mask': (self._n_ugv, self.action_dim)
                 },
                 None,
             ),
             act_space=T(
-                (self._n_uav, self.action_dim),
+                (self._n_ugv, self.action_dim),
                 {
                     'min': 0,
                     'max': self.action_dim,

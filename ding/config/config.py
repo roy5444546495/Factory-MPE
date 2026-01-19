@@ -232,15 +232,14 @@ def save_config_py(config_: dict, path: str) -> NoReturn:
             obstacle_thresholds = [(0, 1.0), (3, 0.85), (6, 0.6), (10, 0.2), (float('inf'), 0.80)]
             obstacle_factor = next(factor for threshold, factor in obstacle_thresholds if n_obstacle <= threshold)
             # 根据任务规模定义参数配置表（包含默认配置）
-            # (max_targets, alpha, beta, base_scale, exp1_decay, exp2_decay)
+            # (max_targets, alpha, beta, base_scale, exp1_decay, exp2_decay, exp2_decay_alpha)
             scale_configs = [
                 (5,  1e2,   1e6, 1.43 * obstacle_factor, 0.9, 0.96),  # 小规模[4-5]: 
-                (8,  1.7e6, 1e6, 1.35 * obstacle_factor, 0.8, 0.92),  # 中小规模[6-8]:
-                (11, 4.2e6, 1e6, 1.20 * obstacle_factor, 0.675,  0.86),  # 中等规模[9-11]: 
-                (15, 4.8e6, 1e6, 1.15 * obstacle_factor, 0.675,  0.0),  # 中大规模[12-15]: 
-                (float('inf'), 8e6, 1e6, 1.0 * obstacle_factor, 0.0, 0.0),  # 大规模[>15]: 
+                (8,  1.0e6, 1e6, 1.35 * obstacle_factor, 0.8, 0.92),  # 中小规模[6-8]:
+                (11, 2.5e6, 1e6, 1.20 * obstacle_factor, 0.675,  0.86),  # 中等规模[9-11]: 
+                (15, 3.5e6, 1e6, 1.15 * obstacle_factor, 0.675,  0.0),  # 中大规模[12-15]: 
+                (float('inf'), 4e6, 1e6, 1.0 * obstacle_factor, 0.0, 0.0),  # 大规模[>15]: 
             ]
-
 
             # 查找适配的配置
             for max_targets, alpha, beta, base_scale, exp1_decay, exp2_decay in scale_configs:
@@ -251,7 +250,10 @@ def save_config_py(config_: dict, path: str) -> NoReturn:
                         scale *= exp1_decay
                     if not experiment2:
                         scale *= exp2_decay
-                    
+                    # 非experiment2训练速度还要慢
+                    if not experiment2:
+                        alpha += 1.0e6
+                        
                     collector_config = {
                         'alpha': alpha,
                         'beta': beta,
@@ -266,7 +268,7 @@ def save_config_py(config_: dict, path: str) -> NoReturn:
 
 
     # Refresh about environment
-    config_['env']['n_uav'] = 3
+    config_['env']['n_ugv'] = 3
     config_['env']['n_target'] = 3    
     config_['env']['num_landmarks'] = 1    
     config_['env']['num_catch'] = 2 

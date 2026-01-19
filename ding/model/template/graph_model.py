@@ -12,7 +12,8 @@ from .q_learning import DRQN
 import math 
 import itertools
 from torch_geometric.nn import GCNConv
-
+from dizoo.multiagent_particle.envs.qwen import QwenAgent
+from dizoo.multiagent_particle.envs.doubao import DoubaoAgent
 class GCN(torch.nn.Module):
     def __init__(self, 
             input_dim, 
@@ -28,7 +29,7 @@ class GCN(torch.nn.Module):
         x = F.relu(x)
         x = self.conv2(x, edge_index)
         return x 
-        
+    
 class GraphWeight(nn.Module):
     def __init__(self, 
                  input_dim,
@@ -157,11 +158,11 @@ class GraphModel(nn.Module):
             dueling: bool = False, 
     ) -> None:
         super(GraphModel, self).__init__()
-        region_emb_shape = 10
+        self._agent =  DoubaoAgent()
+        self._total_forward_count = 0
         self._agent_num = agent_num
         self._act = nn.ReLU()
-        self._q_network = DRQN(obs_shape + (self._agent_num - 1) * 2 + region_emb_shape, action_shape, hidden_size_list, lstm_type=lstm_type, dueling=dueling)
-        self._region_encoder = nn.Linear(obs_shape, region_emb_shape)
+        self._q_network = DRQN(obs_shape + (self._agent_num - 1) * 2, action_shape, hidden_size_list, lstm_type=lstm_type, dueling=dueling)
         q_input_size = global_obs_shape + hidden_size_list[-1] + action_shape
         self.Q = JointQ(q_input_size, embedding_size, hidden_dim = 8)
         self._transformer = Attention()
@@ -176,39 +177,56 @@ class GraphModel(nn.Module):
         ae_input = hidden_size_list[-1] + action_shape
         self.action_encoding = nn.Sequential(nn.Linear(ae_input, ae_input), nn.ReLU(), nn.Linear(ae_input, ae_input))
 
-    def compute_clip_loss(self, region_embs, labels, temperature=1):
-        T, B, A, N = region_embs.shape
-        region_embs = F.normalize(region_embs, p=2, dim=-1)
-        sim_matrix = torch.matmul(region_embs, region_embs.transpose(-1, -2)) / temperature
-        same_label = (labels.unsqueeze(-1) == labels.unsqueeze(-2)).float()
-        eye_mask = torch.eye(A, device=region_embs.device).float().view(1, 1, A, A)
+    def compute_klloss(self, p, q):
+        """
+        计算两个张量之间的 KL 散度。
         
-        exp_sim = torch.exp(sim_matrix) * (1 - eye_mask)
-        row_sums = exp_sim.sum(dim=-1, keepdim=True)
+        参数:
+            p: 形状为 (Batch, agent_num) 的张量，表示概率分布。
+            q: 形状为 (Batch, agent_num) 的张量，表示概率分布。
         
-        pos_mask = same_label * (1 - eye_mask)
-        pos_loss_elements = -torch.log(exp_sim / (row_sums + 1e-8)) * pos_mask
-        num_pos = pos_mask.sum(dim=(-1, -2))
-        pos_loss = pos_loss_elements.sum(dim=(-1, -2)) / torch.clamp(num_pos, min=1)
-        neg_mask = (1 - same_label) * (1 - eye_mask)
-        neg_loss_elements = -torch.log(1 - exp_sim / (row_sums + 1e-8)) * neg_mask
-        num_neg = neg_mask.sum(dim=(-1, -2))
-        neg_loss = neg_loss_elements.sum(dim=(-1, -2)) / torch.clamp(num_neg, min=1)
+        返回:
+            KL 散度值，形状为 (Batch,)
+        """
+        # 确保输入是概率分布（每行的和为 1）
+        p = F.softmax(p, dim=-1)
+        q = F.softmax(q, dim=-1)
         
-        clip_loss = pos_loss + neg_loss
-        return clip_loss
+        # 计算 KL 散度
+        klloss = F.kl_div(p.log(), q, reduction='none').sum(dim=-1)
+        return klloss
     
     def forward(self, data: dict, single_step: bool = True) -> dict:
-        agent_state, global_state, prev_state = data['obs']['agent_state'], data['obs']['global_state'], data[
-            'prev_state']     
-        region_state =  data['obs']['region_state']
-        region_label = data['obs']['region_label']
+        self._total_forward_count += 1
+        agent_state, global_state, prev_state = data['obs']['agent_state'], data['obs']['global_state'], data['prev_state']     
+        neighborhood_state =  data['obs']['neighborhood_state']
+        # reward_coef =  data['obs']['rew_coef']
+        
+
+        
         action = data.get('action', None)
         if single_step:
             agent_state, global_state = agent_state.unsqueeze(0), global_state.unsqueeze(0)
-            region_state = region_state.unsqueeze(0)
-            region_label = region_label.unsqueeze(0)
+            neighborhood_state = neighborhood_state.unsqueeze(0)
+            # reward_coef = reward_coef.unsqueeze(0)
+
+            if True:
+                # Usable info
+                n_agent = data['obs']['n_agent']
+                n_target = data['obs']['n_target']
+                num_landmarks = data['obs']['num_landmarks']
+                timestep = data['obs']['timestep']
+                llm_exploration = data['obs']['llm_exploration']
+                timestep = timestep[0].cpu().numpy()
+                num_landmarks = num_landmarks[0].cpu().numpy()
+                n_agent = n_agent[0].cpu().numpy()
+                n_target = n_target[0].cpu().numpy()
+                llm_exploration = llm_exploration[0].cpu().numpy()
+                # print(f"Before calling get_teacher_policy: agent_state.shape = {agent_state.shape}")
+                teacher_policy = self._agent.get_teacher_policy(agent_state, self._total_forward_count, timestep, n_agent, n_target, num_landmarks)
+
         T, B, A = agent_state.shape[:3]
+        # print(f"Prev = {prev_state}")
         assert len(prev_state) == B and all(
             [len(p) == A for p in prev_state]
         ), '{}-{}-{}-{}'.format([type(p) for p in prev_state], B, A, len(prev_state[0]))
@@ -216,11 +234,9 @@ class GraphModel(nn.Module):
             agent_state = agent_state.unsqueeze(0)
         agent_relation = agent_state[:, :, :, 4: 4 + (self._agent_num-1) * 2]                 
         edges = torch.tensor(list(itertools.combinations(range(A), 2))).t().contiguous().to(agent_state.device)
-        region_emb = self._region_encoder(agent_state)
-        clip_loss = self.compute_clip_loss(region_emb, region_label)
         attention_map = self._graph_weight(agent_state, edges)
         message_state = self._graph_encoder(attention_map, agent_relation)               
-        agent_state = torch.cat([agent_state, message_state, region_emb], dim = -1)                  
+        agent_state = torch.cat([agent_state, message_state], dim = -1)                  
         prev_state = reduce(lambda x, y: x + y, prev_state)
         agent_state = agent_state.reshape(T, -1, *agent_state.shape[3:])                     
         output = self._q_network({'obs': agent_state, 'prev_state': prev_state, 'enable_fast_timestep': True})
@@ -243,26 +259,29 @@ class GraphModel(nn.Module):
         action_onehot = torch.zeros(size=(T * B, A, agent_q.shape[-1]), device=action.device)
         action_onehot = action_onehot.scatter(2, action, 1)
         agent_state_action_input = torch.cat([hidden_states, action_onehot], dim=2)
-        agent_state_action_encoding = self.action_encoding(agent_state_action_input.reshape(T * B * A, -1)).reshape(T * B, A, -1)
+        agent_state_action_encoding = self.action_encoding(agent_state_action_input.reshape(T * B * A,
+                                                                                            -1)).reshape(T * B, A, -1)
         agent_state_action_encoding = agent_state_action_encoding.sum(dim=1)  # Sum across agents
         inputs = torch.cat([global_state.reshape(T * B, -1), agent_state_action_encoding], dim=1)
-        neighborhood_emb = self._neb_encoder(region_state, edges)
+        neighborhood_emb = self._neb_encoder(neighborhood_state, edges)
         attention_map = self._transformer(neighborhood_emb)[:, :, :, 0].unsqueeze(2)
         weight_neighborhood_emb = torch.matmul(attention_map, neighborhood_emb).reshape(T, B, -1)
         q_outputs = self.Q(weight_neighborhood_emb.reshape(T * B, -1), inputs).reshape(T, B)
         v_outputs = self.V(global_state.reshape(T * B, -1))
         v_outputs = v_outputs.reshape(T, B)
         if single_step:
-            q_outputs, agent_q, agent_q_act, v_outputs = q_outputs.squeeze(0), agent_q.squeeze(0), agent_q_act.squeeze(
-                0
-            ), v_outputs.squeeze(0)
-            clip_loss = clip_loss.squeeze(0)
-        return {
+            q_outputs, agent_q, agent_q_act, v_outputs = q_outputs.squeeze(0), agent_q.squeeze(0), agent_q_act.squeeze(0), v_outputs.squeeze(0)
+        
+        result = {
             'total_q': q_outputs,
             'logit': agent_q,
             'agent_q_act': agent_q_act,
             'vs': v_outputs,
             'next_state': next_state,
             'action_mask': data['obs']['action_mask'],
-            'clip_loss': clip_loss
         }
+        if single_step:
+            if llm_exploration:
+                result.update({'teacher_policy': teacher_policy})
+
+        return result
