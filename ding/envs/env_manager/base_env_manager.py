@@ -311,7 +311,7 @@ class BaseEnvManager(object):
                 self._ready_obs[env_id] = timesteps[env_id].obs
             if sleep_count % 1000 == 0:
                 # time.sleep(0.05)
-                sleep_count += 1
+                pass
                 
         return timesteps
 

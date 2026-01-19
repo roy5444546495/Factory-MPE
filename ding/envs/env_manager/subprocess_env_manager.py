@@ -431,8 +431,7 @@ class AsyncSubprocessEnvManager(BaseEnvManager):
             self._pipe_parents[env_id].send(['step', [act], {}])
             if sleep_count % 1000 == 0:
                 # time.sleep(0.05)
-                sleep_count += 1
-                
+                pass                
                 
         timesteps = {}
         step_args = self._async_args['step']
@@ -783,8 +782,8 @@ class SyncSubprocessEnvManager(AsyncSubprocessEnvManager):
         sleep_count = 1000
         for env_id, timestep in timesteps.items():
             if sleep_count % 1000 == 0:
-                time.sleep(0.05)
-                sleep_count += 1
+                # time.sleep(0.05)
+                pass
                 
             if is_abnormal_timestep(timestep):
                 self._env_states[env_id] = EnvState.ERROR
