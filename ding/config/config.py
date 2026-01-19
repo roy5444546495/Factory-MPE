@@ -159,44 +159,111 @@ def save_config_py(config_: dict, path: str) -> NoReturn:
     config_['policy']['type'] = 'qtran' + '_command'
     print("hello pig")
     
-    # Fixed scale related parameters
-    config_['policy']['collect']['collector']['rate'] = float(config_['env']['n_target'] / 3.0)
-    config_['policy']['collect']['collector']['lower'] = 0
-    config_['policy']['collect']['collector']['upper'] = 30
-    config_['policy']['eval']['evaluator']['lower'] = 0
-    config_['policy']['eval']['evaluator']['upper'] = 30
-    config_['policy']['eval']['evaluator']['rate'] = float(config_['env']['n_target'] / 3.0)
-    # Tune scale related parameters
-    if config_['env']['n_target'] <= 8:
-        config_['policy']['collect']['collector']['alpha'] = 1e2
-        config_['policy']['collect']['collector']['beta'] = 1e6
-        config_['policy']['collect']['collector']['scale'] = 1.43
-        if not config_['policy']['experiment']:
-            config_['policy']['collect']['collector']['scale'] *= 0.95
-    elif config_['env']['n_target'] <= 10:
-        config_['policy']['collect']['collector']['alpha'] = 1.7e6
-        config_['policy']['collect']['collector']['beta'] = 1e6
-        config_['policy']['collect']['collector']['scale'] = 1.35 
-        if not config_['policy']['experiment']:
-            config_['policy']['collect']['collector']['scale'] *= 0.9
-    elif config_['env']['n_target'] <= 15:
-        config_['policy']['collect']['collector']['alpha'] = 4.2e6         
-        config_['policy']['collect']['collector']['beta'] = 1e6
-        config_['policy']['collect']['collector']['scale'] = 1.20
-        if not config_['policy']['experiment']:
-            config_['policy']['collect']['collector']['scale'] *= 0.85
-    elif config_['env']['n_target'] <= 20:
-        config_['policy']['collect']['collector']['alpha'] = 4.8e6         
-        config_['policy']['collect']['collector']['beta'] = 1e6
-        config_['policy']['collect']['collector']['scale'] = 1.15
-        if not config_['policy']['experiment']:
-            config_['policy']['collect']['collector']['scale'] *= 0.85
+    version1 = False
+    if version1:
+        print("WGNOWNG")
+        # Fixed scale related parameters
+        config_['policy']['collect']['collector']['rate'] = float(config_['env']['n_target'] / 3.0)
+        config_['policy']['collect']['collector']['lower'] = 0
+        config_['policy']['collect']['collector']['upper'] = 30
+        config_['policy']['eval']['evaluator']['lower'] = 0
+        config_['policy']['eval']['evaluator']['upper'] = 30
+        config_['policy']['eval']['evaluator']['rate'] = float(config_['env']['n_target'] / 3.0)
+        # Tune scale related parameters
+        if config_['env']['n_target'] <= 5:                                     # [4, 5]
+            config_['policy']['collect']['collector']['alpha'] = 1e2
+            config_['policy']['collect']['collector']['beta'] = 1e6
+            config_['policy']['collect']['collector']['scale'] = 1.43
+            if not config_['policy']['experiment']:
+                config_['policy']['collect']['collector']['scale'] *= 0.95      # [6, 8]
+        elif config_['env']['n_target'] <= 8:
+            config_['policy']['collect']['collector']['alpha'] = 1.7e6
+            config_['policy']['collect']['collector']['beta'] = 1e6
+            config_['policy']['collect']['collector']['scale'] = 1.35 
+            if not config_['policy']['experiment']:
+                config_['policy']['collect']['collector']['scale'] *= 0.9
+        elif config_['env']['n_target'] <= 11:                                  # [9]
+            config_['policy']['collect']['collector']['alpha'] = 4.2e6         
+            config_['policy']['collect']['collector']['beta'] = 1e6
+            config_['policy']['collect']['collector']['scale'] = 1.20
+            if not config_['policy']['experiment']:
+                config_['policy']['collect']['collector']['scale'] *= 0.85
+        elif config_['env']['n_target'] <= 15:                                  # [12] （base的模式崩塌）
+            config_['policy']['collect']['collector']['alpha'] = 4.8e6         
+            config_['policy']['collect']['collector']['beta'] = 1e6
+            config_['policy']['collect']['collector']['scale'] = 1.15
+            if not config_['policy']['experiment']:
+                config_['policy']['collect']['collector']['scale'] *= 0.85      # [15] （alg的模式崩塌）
+        else:
+            config_['policy']['collect']['collector']['alpha'] = 8e6         
+            config_['policy']['collect']['collector']['beta'] = 1e6
+            config_['policy']['collect']['collector']['scale'] = 1.0
+            if not config_['policy']['experiment']:
+                config_['policy']['collect']['collector']['scale'] *= 0.75
     else:
-        config_['policy']['collect']['collector']['alpha'] = 8e6         
-        config_['policy']['collect']['collector']['beta'] = 1e6
-        config_['policy']['collect']['collector']['scale'] = 1.0
-        if not config_['policy']['experiment']:
-            config_['policy']['collect']['collector']['scale'] *= 0.75
+        def configure_scale_parameters(config_):
+            """
+            配置与任务规模相关的参数
+            
+            参数说明：
+            - alpha/beta: 控制奖励曲线的衰减速度（越大衰减越慢）
+            - scale: 奖励缩放因子
+            - 随着n_target增大，alpha增大使奖励曲线更平缓，scale减小使整体奖励降低
+            - experiment1/experiment2: 两个独立的优化措施，未启用时会导致性能衰减
+            """
+            n_target = config_['env']['n_target']
+            n_obstacle = config_['env']['num_landmarks']
+            experiment1 = config_['policy'].get('experiment1', False)
+            experiment2 = config_['policy'].get('experiment2', False)
+            
+            # 固定参数配置
+            base_rate = float(n_target / 3.0)
+            config_['policy']['collect']['collector'].update({
+                'rate': base_rate,
+                'lower': 0,
+                'upper': 30
+            })
+            config_['policy']['eval']['evaluator'].update({
+                'rate': base_rate,
+                'lower': 0,
+                'upper': 30
+            })
+            
+            obstacle_thresholds = [(0, 1.0), (3, 0.85), (6, 0.6), (10, 0.2), (float('inf'), 0.80)]
+            obstacle_factor = next(factor for threshold, factor in obstacle_thresholds if n_obstacle <= threshold)
+            # 根据任务规模定义参数配置表（包含默认配置）
+            # (max_targets, alpha, beta, base_scale, exp1_decay, exp2_decay)
+            scale_configs = [
+                (5,  1e2,   1e6, 1.43 * obstacle_factor, 0.9, 0.96),  # 小规模[4-5]: 
+                (8,  1.7e6, 1e6, 1.35 * obstacle_factor, 0.8, 0.92),  # 中小规模[6-8]:
+                (11, 4.2e6, 1e6, 1.20 * obstacle_factor, 0.675,  0.86),  # 中等规模[9-11]: 
+                (15, 4.8e6, 1e6, 1.15 * obstacle_factor, 0.675,  0.0),  # 中大规模[12-15]: 
+                (float('inf'), 8e6, 1e6, 1.0 * obstacle_factor, 0.0, 0.0),  # 大规模[>15]: 
+            ]
+
+
+            # 查找适配的配置
+            for max_targets, alpha, beta, base_scale, exp1_decay, exp2_decay in scale_configs:
+                if n_target <= max_targets:
+                    # 根据优化措施调整scale（未启用优化时应用衰减）
+                    scale = base_scale
+                    if not experiment1:
+                        scale *= exp1_decay
+                    if not experiment2:
+                        scale *= exp2_decay
+                    
+                    collector_config = {
+                        'alpha': alpha,
+                        'beta': beta,
+                        'scale': scale
+                    }
+                    break
+            
+            config_['policy']['collect']['collector'].update(collector_config)
+            
+            return config_
+        config_ = configure_scale_parameters(config_)
+
 
     # Refresh about environment
     config_['env']['n_uav'] = 3
@@ -208,7 +275,7 @@ def save_config_py(config_: dict, path: str) -> NoReturn:
     config_['env']['collision_ratio'] = 2    
 
     # About experiment parameters
-    if config_['policy']['experiment']:
+    if not config_['policy']['experiment1'] or not config_['policy']['experiment2']:
         pass
     else:
         config_['policy']['learn']['discount_factor'] = 0.85
