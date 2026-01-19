@@ -1,0 +1,1 @@
+nohup python 4vs10_alg.py > 4vs10_alg_1.log 2>&1 &

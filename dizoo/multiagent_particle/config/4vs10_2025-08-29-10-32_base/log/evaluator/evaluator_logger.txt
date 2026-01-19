@@ -1,0 +1,11 @@
+[2025-08-29 10:32:30,863][interaction_serial_evaluator.py][line: 204][    INFO] [EVALUATOR]env 0 finish episode, final reward: 3.299999952316284, current episode: 1
+[2025-08-29 10:32:30,864][interaction_serial_evaluator.py][line: 204][    INFO] [EVALUATOR]env 1 finish episode, final reward: -0.36000001430511475, current episode: 2
+[2025-08-29 10:32:30,864][interaction_serial_evaluator.py][line: 204][    INFO] [EVALUATOR]env 2 finish episode, final reward: -0.20000000298023224, current episode: 3
+[2025-08-29 10:32:30,864][interaction_serial_evaluator.py][line: 204][    INFO] [EVALUATOR]env 3 finish episode, final reward: 1.8200000524520874, current episode: 4
+[2025-08-29 10:32:30,864][interaction_serial_evaluator.py][line: 204][    INFO] [EVALUATOR]env 4 finish episode, final reward: 0.0, current episode: 5
+[2025-08-29 10:32:30,865][interaction_serial_evaluator.py][line: 226][    INFO] 
++-------+------------+---------------------+---------------+---------------+-------------------------+---------------+---------------------+----------------------+
+| Name  | train_iter | ckpt_name           | episode_count | envstep_count | avg_envstep_per_episode | evaluate_time | avg_envstep_per_sec | avg_time_per_episode |
++-------+------------+---------------------+---------------+---------------+-------------------------+---------------+---------------------+----------------------+
+| Value | 0.000000   | iteration_0.pth.tar | 5.000000      | 500.000000    | 100.000000              | 2.691366      | 185.779269          | 1.857793             |
++-------+------------+---------------------+---------------+---------------+-------------------------+---------------+---------------------+----------------------+
